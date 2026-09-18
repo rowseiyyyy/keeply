@@ -218,6 +218,8 @@ aside#sidebar{
 }
 .side-item:hover{background:rgba(255,255,255,0.07); color:var(--text-hi);}
 .side-item.active{background:rgba(185,163,255,0.16); color:var(--accent-2); font-weight:500;}
+.side-item.danger{color:#ff9d9d;}
+.side-item.danger:hover{background:rgba(244,63,94,0.14); color:#ffc4c4;}
 .side-item svg{flex-shrink:0; opacity:0.85;}
 .side-divider{height:1px;background:var(--glass-border);margin:12px 4px;}
 .side-heading{
@@ -432,10 +434,42 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
   .logo span.wordmark{display:none;}
 }
 </style>
+<style>
+/* Google auth gate + status */
+#authGate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(20,16,36,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+.auth-card{display:flex;flex-direction:column;align-items:center;gap:18px;padding:48px 56px;border-radius:24px;text-align:center;}
+.auth-card .mark{width:64px;height:64px;font-size:32px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:linear-gradient(135deg,#7b5cff,#25d9c4);}
+.gbtn{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;border:none;background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
+.gbtn:hover{background:#f1f3f4;}
+.gbtn svg{flex:none;}
+.save-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim,rgba(255,255,255,.55));white-space:nowrap;padding:0 6px;}
+.save-status.ok{color:#22c55e;}
+.save-status.err{color:#f43f5e;}
+.acct-btn{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:transparent;color:inherit;cursor:pointer;font-family:inherit;font-size:13px;}
+.acct-btn:hover{background:rgba(255,255,255,.08);}
+.acct-btn img{width:26px;height:26px;border-radius:50%;}
+</style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <div class="bg-blobs">
   <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+</div>
+
+<div id="authGate" style="display:none;">
+  <div class="auth-card glass">
+    <div class="mark">K</div>
+    <h2 style="margin:0;font-size:22px;">Welcome to Keeply</h2>
+    <p style="margin:0;opacity:.65;font-size:14px;max-width:340px;">
+      Sign in with your Google account. Your notes are stored privately in your
+      Google Drive (hidden app folder) and auto-saved as you type.
+    </p>
+    <button class="gbtn" onclick="signInClicked()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.2 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.4 5.8c4.4-4.1 7.2-10.1 7.2-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 010-9.4l-7.8-6.1a24 24 0 000 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.6-2 15.4-5.6l-7.4-5.8c-2 1.4-4.7 2.3-8 2.3-6.3 0-11.7-3.7-13.6-9.2l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+      Sign in with Google
+    </button>
+    <span id="authError" style="color:#f43f5e;font-size:13px;min-height:18px;"></span>
+  </div>
 </div>
 
 <div id="app">
@@ -449,6 +483,11 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
       <input id="searchInput" type="text" placeholder="Search notes, labels, files or [[linked titles]]…" oninput="setSearch(this.value)">
     </div>
     <div class="header-actions">
+      <span class="save-status" id="saveStatus" title="Your notes are auto-saved to your Google Drive"></span>
+      <button class="acct-btn" id="acctBtn" title="Account — click to sign out" onclick="signOutClicked()" style="display:none;">
+        <img id="acctAvatar" alt="" referrerpolicy="no-referrer">
+        <span id="acctEmail"></span>
+      </button>
       <select class="sort-select" id="sortSelect" onchange="setSort(this.value)">
         <option value="updated">Recently edited</option>
         <option value="created">Recently created</option>
@@ -517,6 +556,13 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
         <div class="side-item" data-filter="trash" onclick="setFilter('trash')">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6"/></svg>
           Trash
+        </div>
+      </div>
+      <div class="side-divider" id="signOutDivider" style="display:none;"></div>
+      <div class="side-section" id="signOutSection" style="display:none;">
+        <div class="side-item danger" id="signOutBtn" onclick="signOutClicked()" title="Sign out of Keeply — your notes stay in your Google Drive">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h3a2 2 0 012 2v14a2 2 0 01-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+          Sign out
         </div>
       </div>
     </aside>
@@ -609,7 +655,277 @@ function freshComposerState(){
   };
 }
 
-/* ============================= PERSISTENCE ============================= */
+/* ============================= GOOGLE AUTH + DRIVE SYNC ============================= */
+// 1) Create an OAuth Client ID (Web application) at https://console.cloud.google.com
+//    - Enable the "Google Drive API"
+//    - OAuth consent screen: External, add scope .../auth/drive.appdata, add yourself as Test user
+//    - Authorized JavaScript origins: http://localhost:5500 (and your deployed origin)
+// 2) Paste the Client ID below.
+const GOOGLE_CLIENT_ID = '1004899562442-dvrb3pi5osc8k4h6ql6itq74k4c8a813.apps.googleusercontent.com';
+const DRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.appdata openid email profile';
+const DRIVE_FILENAME = 'keeply.json';
+const AUTOSAVE_DELAY = 1500; // ms after the last change
+
+let authState = { signedIn:false, accessToken:null, expiresAt:0, user:null, tokenClient:null, fileId:null };
+let saveTimer = null, savingNow = false, savePending = false, driveLoaded = false, lastSavedAt = null;
+
+/* ---------- status pill ---------- */
+function setStatus(text, cls){
+  const el = document.getElementById('saveStatus');
+  if(!el) return;
+  el.textContent = text;
+  el.className = 'save-status' + (cls ? ' ' + cls : '');
+}
+function signedInLabel(){
+  if(!lastSavedAt) return 'Synced with Drive';
+  return 'Saved to Drive \u2022 ' + new Date(lastSavedAt).toLocaleTimeString();
+}
+
+/* ---------- sign-in ---------- */
+function showAuthGate(message){
+  const gate = document.getElementById('authGate');
+  if(gate) gate.style.display = 'flex';
+  document.getElementById('app').style.visibility = 'hidden';
+  const err = document.getElementById('authError');
+  if(err && message) err.textContent = message;
+}
+function hideAuthGate(){
+  document.getElementById('authGate').style.display = 'none';
+  document.getElementById('app').style.visibility = 'visible';
+}
+function renderAccountBtn(){
+  const btn = document.getElementById('acctBtn');
+  const sec = document.getElementById('signOutSection');
+  const div = document.getElementById('signOutDivider');
+  const show = authState.signedIn;
+  if(btn) btn.style.display = show ? 'flex' : 'none';
+  if(sec) sec.style.display = show ? 'block' : 'none';
+  if(div) div.style.display = show ? 'block' : 'none';
+  if(!show || !btn) return;
+  const avatar = document.getElementById('acctAvatar');
+  if(authState.user && authState.user.picture){ avatar.src = authState.user.picture; avatar.style.display = 'block'; }
+  else avatar.style.display = 'none';
+  document.getElementById('acctEmail').textContent = (authState.user && authState.user.email) || '';
+  btn.title = 'Account' + (authState.user && authState.user.email ? ' \u2014 ' + authState.user.email : '') + ' \u2014 click to sign out';
+}
+function signInClicked(){
+  document.getElementById('authError').textContent = '';
+  requestToken('');
+}
+function signOutClicked(){
+  if(!authState.signedIn) return;
+  if(!confirm('Sign out of Keeply?\n\nYour notes stay safely in your Google Drive.')) return;
+  signOutNow();
+}
+function signOutNow(){
+  const tok = authState.accessToken;
+  if(tok && window.google && google.accounts && google.accounts.oauth2){
+    try{ google.accounts.oauth2.revoke(tok, ()=>{}); }catch(e){}
+  }
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  authState.signedIn = false;
+  authState.accessToken = null;
+  authState.expiresAt = 0;
+  authState.user = null;
+  authState.fileId = null;
+  lastSavedAt = null;
+  driveLoaded = false;
+  setStatus('');
+  renderAccountBtn();
+  showAuthGate('You have been signed out.');
+}
+function initAuth(){
+  if(typeof google === 'undefined' || !google.accounts){
+    setTimeout(initAuth, 200); // GIS script still loading
+    return;
+  }
+  if(GOOGLE_CLIENT_ID.startsWith('YOUR_')){
+    showAuthGate('Setup needed: set GOOGLE_CLIENT_ID in frontend/index.html (see the comment block above it).');
+    return;
+  }
+  authState.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPES,
+    callback: onTokenResponse,
+  });
+  requestToken(''); // silent attempt using the user's existing Google session
+}
+function requestToken(prompt){
+  try{ authState.tokenClient.requestAccessToken({ prompt: prompt }); }
+  catch(e){ showAuthGate('Could not reach Google sign-in. Please try again.'); }
+}
+function requestTokenAsync(){
+  const client = authState.tokenClient;
+  const prev = client.callback;
+  const restore = () => { client.callback = prev; };
+  return new Promise((resolve, reject) => {
+    client.callback = (resp) => {
+      restore();
+      if(resp.error) reject(new Error(resp.error)); else resolve(resp);
+    };
+    try{ client.requestAccessToken({ prompt: '' }); }
+    catch(e){ restore(); reject(e); }
+  });
+}
+async function ensureFreshToken(){
+  if(Date.now() < authState.expiresAt - 60000) return;
+  const resp = await requestTokenAsync();
+  applyToken(resp);
+}
+function applyToken(resp){
+  authState.accessToken = resp.access_token;
+  authState.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+}
+async function onTokenResponse(resp){
+  if(resp.error){
+    showAuthGate('Sign-in was cancelled or failed. Click the button to try again.');
+    return;
+  }
+  applyToken(resp);
+  try{
+    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: 'Bearer ' + authState.accessToken }
+    });
+    authState.user = await r.json();
+  }catch(e){ authState.user = null; }
+  authState.signedIn = true;
+  hideAuthGate();
+  renderAccountBtn();
+  await loadFromDrive();
+}
+
+/* ---------- drive helpers ---------- */
+async function findDriveFile(){
+  const q = encodeURIComponent(`name = '${DRIVE_FILENAME}' and trashed = false`);
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,modifiedTime)`,
+    { headers: { Authorization: 'Bearer ' + authState.accessToken } }
+  );
+  if(!r.ok) throw new Error('Drive list failed: ' + r.status);
+  const data = await r.json();
+  return (data.files && data.files[0] && data.files[0].id) || null;
+}
+async function readDriveFile(fileId){
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: 'Bearer ' + authState.accessToken }
+  });
+  if(!r.ok) throw new Error('Drive read failed: ' + r.status);
+  return r.text();
+}
+async function writeDriveFile(fileId, content){
+  const boundary = 'keeply-' + Date.now();
+  const metadata = fileId ? {} : { name: DRIVE_FILENAME, parents: ['appDataFolder'] };
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    JSON.stringify(metadata) +
+    `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
+  const url = fileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+  const r = await fetch(url, {
+    method: fileId ? 'PATCH' : 'POST',
+    headers: { Authorization: 'Bearer ' + authState.accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  if(!r.ok) throw new Error('Drive write failed: ' + r.status);
+  const data = await r.json();
+  return data.id;
+}
+
+/* ---------- load / apply ---------- */
+function snapshotState(){
+  return JSON.stringify({
+    version: 1,
+    savedAt: Date.now(),
+    notes,
+    customThemes,
+    settings: {
+      view: ui.view, sort: ui.sort, theme: ui.theme, tweak: ui.tweak,
+      density: ui.density, splitView: ui.splitView, workspace: ui.workspace,
+    },
+  });
+}
+function applyLoadedState(data){
+  if(Array.isArray(data.notes)) notes = data.notes;
+  if(Array.isArray(data.customThemes)) customThemes = data.customThemes;
+  if(data.settings){
+    const s = data.settings;
+    ['view','sort','theme','tweak','density','splitView','workspace'].forEach(k => {
+      if(s[k] !== undefined) ui[k] = s[k];
+    });
+    localStorage.setItem('kp_view', ui.view);
+    localStorage.setItem('kp_sort', ui.sort);
+    localStorage.setItem('kp_theme', ui.theme);
+    localStorage.setItem('kp_tweak', ui.tweak);
+    localStorage.setItem('kp_density', ui.density);
+    localStorage.setItem('kp_split', ui.splitView ? '1' : '0');
+    localStorage.setItem('kp_workspace', JSON.stringify(ui.workspace));
+    localStorage.setItem('kp_notes', JSON.stringify(notes));
+    localStorage.setItem('kp_custom_themes', JSON.stringify(customThemes));
+  }
+}
+async function loadFromDrive(){
+  try{
+    setStatus('Loading from Drive\u2026');
+    authState.fileId = await findDriveFile();
+    if(authState.fileId){
+      const raw = await readDriveFile(authState.fileId);
+      applyLoadedState(JSON.parse(raw));
+    }else{
+      // first run for this account: push whatever is here (local cache or seed notes)
+      savePending = true;
+    }
+    driveLoaded = true;
+    // re-apply view settings to the DOM
+    const sel = document.getElementById('sortSelect');
+    if(sel) sel.value = ui.sort;
+    setView(ui.view);
+    applyTheme(ui.theme);
+    document.documentElement.setAttribute('data-tweak', ui.tweak);
+    document.documentElement.setAttribute('data-density', ui.density);
+    renderAll();
+    if(savePending){ savePending = false; scheduleDriveSave(0); }
+    else setStatus(signedInLabel(), 'ok');
+  }catch(e){
+    console.error('Drive load failed', e);
+    setStatus('Could not load from Drive', 'err');
+  }
+}
+
+/* ---------- auto-save ---------- */
+function scheduleDriveSave(delay){
+  if(!authState.signedIn){ savePending = true; return; }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveToDrive, delay === 0 ? 0 : AUTOSAVE_DELAY);
+}
+async function saveToDrive(){
+  if(!authState.signedIn){ savePending = true; return; }
+  if(savingNow){ savePending = true; return; }
+  savingNow = true;
+  setStatus('Saving\u2026');
+  try{
+    await ensureFreshToken();
+    authState.fileId = await writeDriveFile(authState.fileId, snapshotState());
+    lastSavedAt = Date.now();
+    setStatus(signedInLabel(), 'ok');
+  }catch(e){
+    console.error('Drive save failed', e);
+    setStatus('Save failed \u2014 will retry on next change', 'err');
+    savePending = true;
+  }finally{
+    savingNow = false;
+    if(savePending){ savePending = false; scheduleDriveSave(0); }
+  }
+}
+window.addEventListener('pagehide', () => {
+  if(authState.signedIn && !savingNow) saveToDrive();
+});
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden' && authState.signedIn && !savingNow) saveToDrive();
+});
+
+/* ============================= PERSISTENCE (offline cache) ============================= */
 function loadNotes(){
   try{
     const raw = localStorage.getItem('kp_notes');
@@ -617,11 +933,11 @@ function loadNotes(){
   }catch(e){}
   return seedNotes();
 }
-function saveNotes(){ localStorage.setItem('kp_notes', JSON.stringify(notes)); }
+function saveNotes(){ localStorage.setItem('kp_notes', JSON.stringify(notes)); scheduleDriveSave(); }
 function loadCustomThemes(){
   try{ return JSON.parse(localStorage.getItem('kp_custom_themes') || '[]'); }catch(e){ return []; }
 }
-function saveCustomThemes(){ localStorage.setItem('kp_custom_themes', JSON.stringify(customThemes)); }
+function saveCustomThemes(){ localStorage.setItem('kp_custom_themes', JSON.stringify(customThemes)); scheduleDriveSave(); }
 function uid(){ return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 function seedNotes(){
@@ -1000,9 +1316,9 @@ function copyNoteLink(id){
 
 /* ============================= UI STATE SETTERS ============================= */
 function setSearch(v){ ui.search = v.toLowerCase(); renderAll(); }
-function setSort(v){ ui.sort = v; localStorage.setItem('kp_sort', v); renderAll(); }
+function setSort(v){ ui.sort = v; localStorage.setItem('kp_sort', v); scheduleDriveSave(); renderAll(); }
 function setView(v){
-  ui.view = v; localStorage.setItem('kp_view', v);
+  ui.view = v; localStorage.setItem('kp_view', v); scheduleDriveSave();
   document.getElementById('viewGridBtn').classList.toggle('active', v==='grid');
   document.getElementById('viewListBtn').classList.toggle('active', v==='list');
   renderAll();
@@ -1010,14 +1326,14 @@ function setView(v){
 function cycleDensity(){
   const idx = DENSITIES.indexOf(ui.density);
   ui.density = DENSITIES[(idx+1) % DENSITIES.length];
-  localStorage.setItem('kp_density', ui.density);
+  localStorage.setItem('kp_density', ui.density); scheduleDriveSave();
   document.documentElement.setAttribute('data-density', ui.density);
   document.getElementById('densityBtn').title = 'Density: ' + ui.density;
 }
 function cycleTweak(){
   const idx = TWEAKS.indexOf(ui.tweak);
   ui.tweak = TWEAKS[(idx+1) % TWEAKS.length];
-  localStorage.setItem('kp_tweak', ui.tweak);
+  localStorage.setItem('kp_tweak', ui.tweak); scheduleDriveSave();
   document.documentElement.setAttribute('data-tweak', ui.tweak);
   const btn = document.getElementById('tweakBtn');
   btn.title = 'Display: ' + ui.tweak;
@@ -1025,7 +1341,7 @@ function cycleTweak(){
 }
 function toggleSplitView(){
   ui.splitView = !ui.splitView;
-  localStorage.setItem('kp_split', ui.splitView ? '1':'0');
+  localStorage.setItem('kp_split', ui.splitView ? '1':'0'); scheduleDriveSave();
   document.getElementById('splitBtn').classList.toggle('active', ui.splitView);
   renderAll();
 }
@@ -1093,7 +1409,7 @@ function reparentLabel(dragged, target){
 /* ============================= THEME PICKER ============================= */
 function applyTheme(id){
   ui.theme = id;
-  localStorage.setItem('kp_theme', id);
+  localStorage.setItem('kp_theme', id); scheduleDriveSave();
   if(id.startsWith('custom-')){
     const t = customThemes.find(c=>c.id===id);
     document.documentElement.setAttribute('data-theme', 'custom');
@@ -1345,7 +1661,7 @@ function openInSplit(id){
   if(!ui.workspace.includes(id)){
     if(ui.workspace.length >= 3) ui.workspace.shift();
     ui.workspace.push(id);
-    localStorage.setItem('kp_workspace', JSON.stringify(ui.workspace));
+    localStorage.setItem('kp_workspace', JSON.stringify(ui.workspace)); scheduleDriveSave();
   }
   const n = findNote(id);
   if(n){ n.archived=false; n.trashed=false; }
@@ -1353,7 +1669,7 @@ function openInSplit(id){
 }
 function closeSplitPanel(id, skipSave){
   ui.workspace = ui.workspace.filter(x=>x!==id);
-  localStorage.setItem('kp_workspace', JSON.stringify(ui.workspace));
+  localStorage.setItem('kp_workspace', JSON.stringify(ui.workspace)); scheduleDriveSave();
   if(!skipSave) renderAll();
 }
 function wpUpdateTitle(id, val){
@@ -1438,7 +1754,7 @@ function renderComposer(bodyOnly){
       <div id="composer" class="glass" onclick="expandComposer()">
         <div class="composer-collapsed-row">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-          <span>Take a note… (markdown, tables, [[links]], checkboxes, files)</span>
+          <span>Take a note…</span>
           <div class="qbtn">
             <button class="icon-btn" onclick="event.stopPropagation();expandComposer();setTimeout(toolbarChecklist,60)" title="New checklist">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
@@ -1518,7 +1834,7 @@ function renderComposer(bodyOnly){
     </div>
 
     ${composer.tab==='write' ? `
-      <textarea id="composerTextarea" class="composer-body" placeholder="Take a note… try **bold**, - [ ] a task, ## a collapsible header, a | table |, or [[Another Note]]" oninput="setComposerBody(this.value)">${escapeHtml(composer.body)}</textarea>
+      <textarea id="composerTextarea" class="composer-body" placeholder="Take a note… ">${escapeHtml(composer.body)}</textarea>
     ` : `
       <div id="composerPreviewPane" class="composer-preview clearfix">${renderMarkdown({...composer, id: editingId||'__draft__'})}</div>
     `}
@@ -1818,6 +2134,9 @@ document.getElementById('splitBtn').classList.toggle('active', ui.splitView);
 renderThemePopover();
 setView(ui.view);
 renderAll();
+
+// Kick off Google sign-in flow (deferred so GIS script + DOM are ready).
+setTimeout(initAuth, 0);
 </script>
 </body>
 </html>
