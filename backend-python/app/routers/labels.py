@@ -10,7 +10,7 @@ from ..utils import compute_label_tree, safe_parse, serialize_note
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 def list_labels(user_id: UserId):
     with get_db() as db:
         rows = db.execute(

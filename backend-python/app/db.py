@@ -99,6 +99,12 @@ def get_db():
         conn.close()
 
 
+def get_db_dep():
+    """FastAPI dependency wrapper around get_db (contextmanager can't be a dependency)."""
+    with get_db() as conn:
+        yield conn
+
+
 def init_db() -> None:
     conn = connect()
     try:

@@ -19,7 +19,7 @@ def serialize(row) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 def get_settings(user_id: UserId):
     with get_db() as db:
         row = db.execute(
@@ -33,7 +33,7 @@ def get_settings(user_id: UserId):
     return {"settings": serialize(row)}
 
 
-@router.put("/")
+@router.put("")
 def update_settings(user_id: UserId, body: dict = Body(default={})):
     with get_db() as db:
         existing = db.execute(

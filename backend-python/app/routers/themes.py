@@ -13,7 +13,7 @@ def serialize(row) -> dict:
     return {"id": row["id"], "name": row["name"], "bg": row["bg"], "a": row["a"], "b": row["b"], "c": row["c"]}
 
 
-@router.get("/")
+@router.get("")
 def list_themes(user_id: UserId):
     with get_db() as db:
         rows = db.execute(
@@ -23,7 +23,7 @@ def list_themes(user_id: UserId):
     return {"themes": [serialize(r) for r in rows]}
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_theme(user_id: UserId, body: dict = Body(default={})):
     name = body.get("name")
     bg, a, b, c = body.get("bg"), body.get("a"), body.get("b"), body.get("c")

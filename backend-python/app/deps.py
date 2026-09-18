@@ -3,10 +3,10 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
-from .db import get_db
+from .db import get_db_dep
 from .security import verify_token
 
-DbDep = Annotated[sqlite3.Connection, Depends(get_db)]
+DbDep = Annotated[sqlite3.Connection, Depends(get_db_dep)]
 
 
 def _user_id(request: Request, db: DbDep) -> str:

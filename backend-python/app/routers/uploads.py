@@ -12,7 +12,7 @@ router = APIRouter()
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", 15 * 1024 * 1024))
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def upload_file(user_id: UserId, file: UploadFile = File(...)):
     ext = Path(file.filename or "").suffix
     filename = f"{uuid.uuid4()}{ext}"

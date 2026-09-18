@@ -21,7 +21,7 @@ def _json(value):
     return json.dumps(value)
 
 
-@router.get("/")
+@router.get("")
 def list_notes(
     user_id: UserId,
     trashed: Optional[str] = Query(default=None),
@@ -66,7 +66,7 @@ def get_note(note_id: str, user_id: UserId):
     return {"note": serialize_note(row)}
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_note(user_id: UserId, body: dict = Body(default={})):
     note_id = str(uuid.uuid4())
     now = int(time.time() * 1000)
