@@ -11,7 +11,7 @@ database server to run) + **JWT** auth + **multer** for file uploads.
 ## Setup
 
 ```bash
-cd keeply-backend
+cd backend
 npm install
 cp .env.example .env   # then edit JWT_SECRET and CORS_ORIGIN
 npm start               # or `npm run dev` for auto-reload
