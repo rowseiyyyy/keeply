@@ -1,0 +1,4 @@
+cd c:\Users\rowena\System\Keeply\frontend
+python -m http.server 5500 --bind 127.0.0.1
+
+127.0.0.1:5500/index.html
