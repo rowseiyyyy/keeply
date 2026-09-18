@@ -437,6 +437,7 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
 <style>
 /* Google auth gate + status */
 #authGate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(20,16,36,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+#authError.err{color:#ff9d9d;opacity:1;}
 .auth-card{display:flex;flex-direction:column;align-items:center;gap:18px;padding:48px 56px;border-radius:24px;text-align:center;}
 .auth-card .mark{width:64px;height:64px;font-size:32px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:linear-gradient(135deg,#7b5cff,#25d9c4);}
 .gbtn{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;border:none;background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
@@ -456,7 +457,7 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
   <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
 </div>
 
-<div id="authGate" style="display:none;">
+<div id="authGate">
   <div class="auth-card glass">
     <div class="mark">K</div>
     <h2 style="margin:0;font-size:22px;">Welcome to Keeply</h2>
@@ -468,7 +469,7 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.2 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.4 5.8c4.4-4.1 7.2-10.1 7.2-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 010-9.4l-7.8-6.1a24 24 0 000 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.6-2 15.4-5.6l-7.4-5.8c-2 1.4-4.7 2.3-8 2.3-6.3 0-11.7-3.7-13.6-9.2l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
       Sign in with Google
     </button>
-    <span id="authError" style="color:#f43f5e;font-size:13px;min-height:18px;"></span>
+    <span id="authError" style="font-size:13px;min-height:18px;opacity:.8;"></span>
   </div>
 </div>
 
@@ -668,6 +669,9 @@ const AUTOSAVE_DELAY = 1500; // ms after the last change
 
 let authState = { signedIn:false, accessToken:null, expiresAt:0, user:null, tokenClient:null, fileId:null };
 let saveTimer = null, savingNow = false, savePending = false, driveLoaded = false, lastSavedAt = null;
+let authBootAttempts = 0, silentAttempt = false, silentWatchdog = null;
+const AUTH_BOOT_ATTEMPTS = 30;      // ~6s of 200ms retries while the GIS script loads
+const SILENT_TOKEN_TIMEOUT = 4000;  // some browsers never answer a silent token request
 
 /* ---------- status pill ---------- */
 function setStatus(text, cls){
@@ -682,12 +686,15 @@ function signedInLabel(){
 }
 
 /* ---------- sign-in ---------- */
-function showAuthGate(message){
+function showAuthGate(message, isError){
   const gate = document.getElementById('authGate');
   if(gate) gate.style.display = 'flex';
   document.getElementById('app').style.visibility = 'hidden';
   const err = document.getElementById('authError');
-  if(err && message) err.textContent = message;
+  if(err){
+    if(message) err.textContent = message;
+    err.className = isError ? 'err' : '';
+  }
 }
 function hideAuthGate(){
   document.getElementById('authGate').style.display = 'none';
@@ -710,7 +717,15 @@ function renderAccountBtn(){
 }
 function signInClicked(){
   document.getElementById('authError').textContent = '';
-  requestToken('');
+  silentAttempt = false;
+  if(!authState.tokenClient){
+    if(typeof google === 'undefined' || !google.accounts){
+      showAuthGate('Google sign-in is still loading. Wait a moment and try again \u2014 or check your connection and any ad-blocker.', true);
+      return;
+    }
+    createTokenClient();
+  }
+  requestToken('', false);
 }
 function signOutClicked(){
   if(!authState.signedIn) return;
@@ -735,25 +750,45 @@ function signOutNow(){
   renderAccountBtn();
   showAuthGate('You have been signed out.');
 }
-function initAuth(){
-  if(typeof google === 'undefined' || !google.accounts){
-    setTimeout(initAuth, 200); // GIS script still loading
-    return;
-  }
-  if(GOOGLE_CLIENT_ID.startsWith('YOUR_')){
-    showAuthGate('Setup needed: set GOOGLE_CLIENT_ID in frontend/index.html (see the comment block above it).');
-    return;
-  }
+function createTokenClient(){
   authState.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: DRIVE_SCOPES,
     callback: onTokenResponse,
   });
-  requestToken(''); // silent attempt using the user's existing Google session
 }
-function requestToken(prompt){
+function armSilentWatchdog(){
+  // Browsers that block third-party cookies (or use FedCM) can leave a silent
+  // request unanswered, which used to hide the gate forever. Ask instead.
+  clearTimeout(silentWatchdog);
+  silentWatchdog = setTimeout(()=>{
+    if(!authState.signedIn) showAuthGate('Sign in with your Google account to load and save your notes.');
+  }, SILENT_TOKEN_TIMEOUT);
+}
+function initAuth(){
+  if(typeof google === 'undefined' || !google.accounts){
+    // GIS script still loading - retry, but give up eventually instead of
+    // leaving the user in an app that never even attempts to sign them in.
+    if(authBootAttempts++ < AUTH_BOOT_ATTEMPTS){ setTimeout(initAuth, 200); return; }
+    showAuthGate('Could not reach Google sign-in. Check your internet connection and any ad-blocker, then reload the page.', true);
+    return;
+  }
+  if(GOOGLE_CLIENT_ID.startsWith('YOUR_')){
+    showAuthGate('Setup needed: set GOOGLE_CLIENT_ID in frontend/index.html (see the comment block above it).', true);
+    return;
+  }
+  if(!authState.tokenClient) createTokenClient();
+  requestToken('', true); // silent attempt using the user's existing Google session
+}
+function requestToken(prompt, isSilent){
+  if(!authState.tokenClient){
+    showAuthGate('Google sign-in is not ready yet. Check your connection and any ad-blocker, then reload the page.', true);
+    return;
+  }
+  silentAttempt = !!isSilent;
   try{ authState.tokenClient.requestAccessToken({ prompt: prompt }); }
-  catch(e){ showAuthGate('Could not reach Google sign-in. Please try again.'); }
+  catch(e){ showAuthGate('Could not reach Google sign-in. Please try again.', true); }
+  if(silentAttempt) armSilentWatchdog();
 }
 function requestTokenAsync(){
   const client = authState.tokenClient;
@@ -778,8 +813,11 @@ function applyToken(resp){
   authState.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
 }
 async function onTokenResponse(resp){
+  clearTimeout(silentWatchdog);
   if(resp.error){
-    showAuthGate('Sign-in was cancelled or failed. Click the button to try again.');
+    showAuthGate(silentAttempt
+      ? 'Sign in with your Google account to load and save your notes.'
+      : 'Sign-in was cancelled or failed. Click the button to try again.', !silentAttempt);
     return;
   }
   applyToken(resp);
@@ -2135,7 +2173,9 @@ renderThemePopover();
 setView(ui.view);
 renderAll();
 
-// Kick off Google sign-in flow (deferred so GIS script + DOM are ready).
+// Stay gated (and keep #app hidden behind the blurred backdrop) until sign-in
+// succeeds, then kick off the Google flow (deferred so GIS script + DOM are ready).
+showAuthGate('');
 setTimeout(initAuth, 0);
 </script>
 </body>
