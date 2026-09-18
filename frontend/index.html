@@ -265,17 +265,35 @@ main{flex:1; min-width:0; display:flex; flex-direction:column; gap:22px; padding
   color:var(--text-mid);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;font-family:'Space Grotesk',sans-serif;font-weight:600;
 }
 .tbtn:hover{background:rgba(255,255,255,0.09);color:var(--text-hi);}
-.tab-switch{display:flex;gap:2px;background:rgba(255,255,255,0.05);border-radius:10px;padding:2px;margin-left:auto;}
-.tab-switch button{border:none;background:transparent;color:var(--text-lo);font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;font-family:inherit;}
-.tab-switch button.active{background:rgba(255,255,255,0.12);color:var(--text-hi);}
-
-textarea.composer-body{
-  width:100%; min-height:90px; background:transparent; border:none; outline:none; resize:vertical;
-  color:var(--text-hi); font-family:'Inter',sans-serif; font-size:calc(14.5px * var(--font-scale)); line-height:1.55;
+/* ---------- Unified live markdown editor ---------- */
+/* A single contenteditable surface renders markdown in place, replacing the old
+   Write/Preview pair. The markdown source stays verbatim in the DOM (markers are
+   only *wrapped*, never removed) so liveEditorText() recovers the exact body and
+   the caret can be restored by character offset after every re-decoration. */
+.live-editor{
+  width:100%; min-height:90px; background:transparent; border:none; outline:none;
+  color:var(--text-hi); font-family:'Inter',sans-serif; font-size:calc(14.5px * var(--font-scale));
+  line-height:1.6; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere;
 }
-textarea.composer-body::placeholder{color:var(--text-lo);}
-.composer-preview{font-size:calc(14.5px * var(--font-scale)); line-height:1.6; min-height:60px;}
-.composer-preview:empty::before{content:"Nothing to preview yet";color:var(--text-lo);}
+.live-editor:empty::before{content:attr(data-placeholder);color:var(--text-lo);}
+.live-editor .live-line{min-height:1.6em;}
+.live-editor .md-syntax{color:var(--text-lo);opacity:.5;font-weight:400;font-style:normal;}
+.live-editor .live-h1{font-family:'Space Grotesk',sans-serif;font-size:1.35em;font-weight:600;color:var(--text-hi);}
+.live-editor .live-h2{font-family:'Space Grotesk',sans-serif;font-size:1.18em;font-weight:600;color:var(--text-hi);}
+.live-editor .live-h3{font-weight:600;color:var(--text-hi);}
+.live-editor .live-li{padding-left:10px;}
+.live-editor .live-quote{display:inline-block;border-left:2px solid var(--glass-border-strong);padding-left:10px;color:var(--text-mid);}
+.live-editor .live-url{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
+.live-editor .live-wikilink{color:var(--accent);border-bottom:1px dashed rgba(141,255,240,0.5);}
+.live-editor .live-task input{accent-color:var(--accent-2);cursor:pointer;margin:0 4px 0 0;vertical-align:-2px;}
+.live-editor .live-task-done{text-decoration:line-through;color:var(--text-lo);}
+.live-editor .live-table-row{font-family:'JetBrains Mono',monospace;font-size:.9em;background:rgba(255,255,255,0.05);border-radius:6px;padding:0 6px;}
+.live-editor .live-img{display:block;max-width:100%;border-radius:10px;margin:4px 0;}
+.live-editor .live-img-tag{color:var(--text-lo);opacity:.5;font-size:.9em;}
+.live-editor code{background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:5px;font-family:'JetBrains Mono',monospace;font-size:.85em;}
+.live-editor strong{color:var(--text-hi);}
+
+/* (textarea.composer-body / .composer-preview removed - superseded by .live-editor) */
 
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
 .chip{
@@ -388,7 +406,8 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
 }
 .workspace-panel .wp-head{display:flex;align-items:center;gap:8px;}
 .workspace-panel input.wp-title{flex:1;background:transparent;border:none;outline:none;color:var(--text-hi);font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;}
-.workspace-panel textarea.wp-body{flex:1;min-height:220px;background:transparent;border:none;outline:none;resize:none;color:var(--text-hi);font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.5;}
+.workspace-panel .live-editor{flex:1;min-height:220px;overflow-y:auto;font-size:13.5px;line-height:1.5;}
+.workspace-panel .wp-hint{font-size:11px;color:var(--text-lo);margin-left:auto;}
 .workspace-panel .wp-toolbar{display:flex;gap:4px;border-bottom:1px solid var(--glass-border);padding-bottom:6px;}
 
 /* ---------- Popovers / menus ---------- */
@@ -686,7 +705,7 @@ let dragLabelPath = null;
 function freshComposerState(){
   return {
     expanded:false, title:'', body:'', color:'default', pinned:false,
-    labels:[], images:[], attachments:[], collapsedSections:[], tab:'write'
+    labels:[], images:[], attachments:[], collapsedSections:[]
   };
 }
 
@@ -1275,6 +1294,280 @@ function inline(text, note){
   return t;
 }
 
+/* ============================= LIVE MARKDOWN EDITOR ============================= */
+// One contenteditable surface replaces the old Write/Preview pair. Formatting is
+// decorated in place as the user types, but the markdown *source* is preserved
+// character-for-character in the DOM (markers are only wrapped in <span
+// class="md-syntax">, never removed). That lets liveEditorText() rebuild the exact
+// body string, and lets the caret be restored by character offset after each
+// re-decoration.
+const liveEditors = {};   // id -> {el, getNote, onChange}
+const liveTimers = {};    // id -> debounce handle
+const LIVE_SYNC_DELAY = 90;
+
+function liveEditorMarkup(id, placeholder){
+  return `<div id="${id}" class="live-editor" contenteditable="true" spellcheck="true"` +
+    ` data-placeholder="${escapeHtml(placeholder || '')}"` +
+    ` oninput="liveInput(this)" onkeydown="liveKeydown(event, this)"` +
+    ` onpaste="livePaste(event, this)" onblur="liveBlur(this)"></div>`;
+}
+function liveNote(ed){ return (ed && ed.getNote) ? ed.getNote() : null; }
+function mountLiveEditor(id, body, opts){
+  const el = document.getElementById(id);
+  if(!el) return null;
+  clearTimeout(liveTimers[id]);
+  const ed = {el, getNote:(opts && opts.getNote) || null, onChange:(opts && opts.onChange) || null};
+  liveEditors[id] = ed;
+  el.innerHTML = liveMarkdownHtml(body, liveNote(ed));
+  return el;
+}
+// Re-paint the decorations for a body string without touching the model.
+function livePaint(el, body, ed){ el.innerHTML = liveMarkdownHtml(body, liveNote(ed)); }
+
+/* --- decoration: markdown source in, same source text + markup out --- */
+function liveInline(text, note){
+  let t = escapeHtml(text);
+  t = t.replace(/\[\[([^\]]+)\]\]/g, (m, title) =>
+    `<span class="md-syntax">[[</span><span class="live-wikilink">${escapeHtml(title)}</span><span class="md-syntax">]]</span>`);
+  t = t.replace(/(https?:\/\/[^\s<]+)/g, '<span class="live-url">$1</span>');
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<span class="md-syntax">**</span><strong>$1</strong><span class="md-syntax">**</span>');
+  t = t.replace(/(?<!\*)\*([^*<>]+)\*(?!\*)/g, '<span class="md-syntax">*</span><em>$1</em><span class="md-syntax">*</span>');
+  t = t.replace(/`([^`]+)`/g, '<span class="md-syntax">`</span><code>$1</code><span class="md-syntax">`</span>');
+  return t;
+}
+function liveLineHtml(text, note){
+  if(!text) return '<div class="live-line"><br></div>';   // keeps empty lines clickable
+
+  const heading = text.match(/^(#{1,3})(\s+)(.*)$/);
+  if(heading){
+    const lvl = heading[1].length;
+    return `<div class="live-line"><span class="md-syntax">${escapeHtml(heading[1] + heading[2])}</span>` +
+      `<span class="live-h${lvl}">${liveInline(heading[3], note)}</span></div>`;
+  }
+
+  const task = text.match(/^(\s*[-*]\s\[)([ xX])(\]\s?)(.*)$/);
+  if(task){
+    const done = task[2].toLowerCase() === 'x';
+    return '<div class="live-line live-task">' +
+      `<input type="checkbox" contenteditable="false"${done ? ' checked' : ''} onchange="liveToggleTask(event)">` +
+      `<span class="md-syntax">${escapeHtml(task[1] + task[2] + task[3])}</span>` +
+      `<span class="${done ? 'live-task-done' : ''}">${liveInline(task[4], note)}</span></div>`;
+  }
+
+  const bullet = text.match(/^(\s*)([-*])(\s+)(.*)$/);
+  if(bullet){
+    return `<div class="live-line live-li"><span class="md-syntax">${escapeHtml(bullet[1] + bullet[2] + bullet[3])}</span>` +
+      `${liveInline(bullet[4], note)}</div>`;
+  }
+  const numbered = text.match(/^(\s*)(\d+\.)(\s+)(.*)$/);
+  if(numbered){
+    return `<div class="live-line live-li"><span class="md-syntax">${escapeHtml(numbered[1] + numbered[2] + numbered[3])}</span>` +
+      `${liveInline(numbered[4], note)}</div>`;
+  }
+  const quote = text.match(/^(>)(\s?)(.*)$/);
+  if(quote){
+    return `<div class="live-line"><span class="md-syntax">${escapeHtml(quote[1] + quote[2])}</span>` +
+      `<span class="live-quote">${liveInline(quote[3], note)}</span></div>`;
+  }
+
+  const img = text.match(/^!\[img:([\w-]+)(?::(left|right|full|inline))?\]$/);
+  if(img){
+    const found = ((note && note.images) || []).find(im => im.id === img[1]);
+    return `<div class="live-line"><span class="live-img-tag">${escapeHtml(text)}</span>` +
+      (found ? `<img class="live-img" src="${escapeHtml(found.src)}" alt="" contenteditable="false">` : '') + `</div>`;
+  }
+
+  if(isTableRow(text) || isTableSeparator(text)){
+    return `<div class="live-line"><span class="live-table-row">${liveInline(text, note)}</span></div>`;
+  }
+
+  return `<div class="live-line">${liveInline(text, note)}</div>`;
+}
+function liveMarkdownHtml(body, note){
+  const src = (body === null || body === undefined) ? '' : String(body);
+  return src.split('\n').map(t => liveLineHtml(t, note)).join('');
+}
+
+/* --- serialization: DOM back to the exact markdown body --- */
+function liveLineText(node){
+  let out = '';
+  node.childNodes.forEach(c => {
+    if(c.nodeName === 'BR') out += '\n';
+    else if(c.nodeType === 3) out += c.nodeValue;
+    else out += liveLineText(c);   // spans/strong/em/code -> their text; input & img -> ''
+  });
+  return out;
+}
+function liveEditorText(el){
+  if(!el) return '';
+  const nodes = Array.from(el.childNodes);
+  // A trailing root-level <br> is a caret anchor the browser adds, not a line.
+  if(nodes.length > 1 && nodes[nodes.length - 1].nodeName === 'BR') nodes.pop();
+  const out = [];
+  nodes.forEach(node => {
+    if(node.nodeType === 3) node.nodeValue.split('\n').forEach(p => out.push(p));
+    else if(node.nodeName === 'BR') out.push('');
+    else liveNodeText(node).split('\n').forEach(p => out.push(p));
+  });
+  return out.join('\n');
+}
+// Text of one rendered line box. A <br> at the very END is the empty-line marker
+// (or caret anchor) our renderer emits, not a real line break. Without stripping
+// it, every blank line would round-trip as two blank lines and shift everything
+// after it. A <br> in the middle IS a real break and is kept.
+function liveNodeText(node){
+  const t = liveLineText(node);
+  return t.endsWith('\n') ? t.slice(0, -1) : t;
+}
+
+/* --- caret: line index + character offset inside that line --- */
+function liveLineEls(el){ return Array.from(el.children).filter(c => c.classList && c.classList.contains('live-line')); }
+function liveLineOf(el, node){
+  let n = node;
+  while(n && n !== el){
+    if(n.parentNode === el) return (n.nodeType === 1 && n.classList && n.classList.contains('live-line')) ? n : null;
+    n = n.parentNode;
+  }
+  return null;
+}
+function liveCaret(el){
+  const sel = window.getSelection();
+  if(!sel || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if(!el.contains(range.startContainer)) return null;
+  const lineEl = liveLineOf(el, range.startContainer);
+  if(!lineEl) return null;
+  const nodes = Array.from(el.childNodes);
+  if(nodes.length > 1 && nodes[nodes.length - 1].nodeName === 'BR') nodes.pop();
+  let lineIdx = 0;
+  for(const node of nodes){
+    if(node === lineEl) break;
+    if(node.nodeType === 3) lineIdx += node.nodeValue.split('\n').length;
+    else if(node.nodeName === 'BR') lineIdx += 1;
+    else lineIdx += liveNodeText(node).split('\n').length;
+  }
+  const pre = range.cloneRange();
+  pre.selectNodeContents(lineEl);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const parts = pre.toString().split('\n');
+  return {line: lineIdx + parts.length - 1, offset: parts[parts.length - 1].length};
+}
+function liveSetCaret(el, caret){
+  const lines = liveLineEls(el);
+  if(!lines.length) return;
+  const lineEl = lines[Math.max(0, Math.min(caret.line, lines.length - 1))];
+  let remaining = caret.offset, target = null, off = 0;
+  const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while(node){
+    if(remaining <= node.nodeValue.length){ target = node; off = remaining; break; }
+    remaining -= node.nodeValue.length;
+    node = walker.nextNode();
+  }
+  const range = document.createRange();
+  if(target) range.setStart(target, off);
+  else { range.selectNodeContents(lineEl); range.collapse(false); }
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/* --- sync + input handlers --- */
+function liveInput(el){
+  if(!el || !el.id) return;
+  clearTimeout(liveTimers[el.id]);
+  liveTimers[el.id] = setTimeout(() => liveSync(el.id, true), LIVE_SYNC_DELAY);
+}
+function liveSync(id, keepCaret){
+  const ed = liveEditors[id];
+  if(!ed || !ed.el.isConnected) return;   // composer was rebuilt - don't write back
+  clearTimeout(liveTimers[id]);
+  const caret = keepCaret ? liveCaret(ed.el) : null;
+  const text = liveEditorText(ed.el);
+  livePaint(ed.el, text, ed);
+  if(caret) liveSetCaret(ed.el, caret);
+  if(ed.onChange) ed.onChange(text);
+}
+// Serialize without re-painting; used before a rebuild so no keystroke is lost.
+function flushLiveEditor(id){
+  const ed = liveEditors[id];
+  if(!ed || !ed.el || !ed.el.isConnected) return null;
+  clearTimeout(liveTimers[id]);
+  const text = liveEditorText(ed.el);
+  if(ed.onChange) ed.onChange(text);
+  return text;
+}
+function liveBlur(el){ if(el && el.id) liveSync(el.id, false); }
+
+function liveKeydown(ev, el){
+  if(ev.key !== 'Enter' || ev.isComposing) return;
+  const caret = liveCaret(el);
+  if(!caret) return;                       // no caret info -> let the browser handle it
+  ev.preventDefault();
+  const lines = liveEditorText(el).split('\n');
+  const cur = lines[caret.line] || '';
+  const before = cur.slice(0, caret.offset);
+  const after = cur.slice(caret.offset);
+  const item = before.match(/^(\s*)([-*]\s\[[ xX]\]\s|[-*]\s|\d+\.\s)(.*)$/);
+  let target;
+  if(item && !item[3]){
+    // Enter on an empty list / checkbox item ends the list
+    lines[caret.line] = '';
+    target = {line: caret.line, offset: 0};
+  } else {
+    // Keep list / checkbox markers going. A new checkbox item always starts
+    // unchecked, so the [x] state of the line being split is dropped.
+    const prefix = item ? (item[1] + item[2]).replace(/\[[xX]\]/, '[ ]') : '';
+    lines[caret.line] = before;
+    lines.splice(caret.line + 1, 0, prefix + after);
+    target = {line: caret.line + 1, offset: prefix.length};
+  }
+  const text = lines.join('\n');
+  const ed = liveEditors[el.id];
+  livePaint(el, text, ed);
+  liveSetCaret(el, target);
+  if(ed && ed.onChange) ed.onChange(text);
+}
+
+function livePaste(ev, el){
+  const cb = ev.clipboardData || window.clipboardData;
+  if(!cb) return;                          // nothing to intercept
+  ev.preventDefault();
+  const caret = liveCaret(el);
+  if(!caret) return;
+  const raw = (cb.getData('text/plain') || '').replace(/\r\n?/g, '\n');
+  const lines = liveEditorText(el).split('\n');
+  const cur = lines[caret.line] || '';
+  const ins = raw.split('\n');
+  ins[0] = cur.slice(0, caret.offset) + ins[0];
+  const tail = ins.length - 1;
+  ins[tail] = ins[tail] + cur.slice(caret.offset);
+  lines.splice(caret.line, 1, ...ins);
+  const text = lines.join('\n');
+  const ed = liveEditors[el.id];
+  livePaint(el, text, ed);
+  liveSetCaret(el, {line: caret.line + tail, offset: ins[tail].length - (cur.length - caret.offset)});
+  if(ed && ed.onChange) ed.onChange(text);
+}
+
+// Clicking a checkbox in the live view flips the [ ]/[x] marker in the source.
+function liveToggleTask(ev){
+  const input = ev.target;
+  const el = input.closest('.live-editor');
+  if(!el || !el.id) return;
+  const idx = liveLineEls(el).indexOf(input.closest('.live-line'));
+  if(idx < 0) return;
+  const ed = liveEditors[el.id];
+  const caret = liveCaret(el);
+  const lines = liveEditorText(el).split('\n');
+  lines[idx] = (lines[idx] || '').replace(/\[( |x|X)\]/, m => m === '[ ]' ? '[x]' : '[ ]');
+  const text = lines.join('\n');
+  livePaint(el, text, ed);
+  if(caret) liveSetCaret(el, caret); else el.focus();
+  if(ed && ed.onChange) ed.onChange(text);
+}
+
 function getBacklinks(note){
   const re = new RegExp('\\[\\[\\s*'+escapeRegex(note.title)+'\\s*\\]\\]','i');
   return activeNotes().filter(n => n.id !== note.id && re.test(n.body||''));
@@ -1634,12 +1927,14 @@ function startEdit(id){
   composer = {
     expanded:true, title:n.title, body:n.body, color:n.color, pinned:n.pinned,
     labels:[...(n.labels||[])], images:[...(n.images||[])], attachments:[...(n.attachments||[])],
-    collapsedSections:[...(n.collapsedSections||[])], tab:'write'
+    collapsedSections:[...(n.collapsedSections||[])]
   };
   renderAll();
 }
 
 function closeComposer(save=true){
+  // Capture anything still sitting in the live editor before tearing it down.
+  if(composer.expanded) flushLiveEditor('liveBody');
   if(composer.expanded && save){
     const hasContent = composer.title.trim() || composer.body.trim() || composer.images.length || composer.attachments.length;
     if(editingId){
@@ -1673,8 +1968,14 @@ function closeComposer(save=true){
 }
 
 function setComposerTitle(v){ composer.title = v; }
-function setComposerBody(v){ composer.body = v; renderComposer(true); }
-function setComposerTab(tab){ composer.tab = tab; renderComposer(); }
+// Programmatic body changes (version restore, toolbar insertion) repaint the live
+// editor in place. There is no longer a separate preview pane to update.
+function setComposerBody(v){ composer.body = v; repaintLiveBody(); }
+function repaintLiveBody(){
+  const ed = liveEditors['liveBody'];
+  if(!ed || !ed.el || !ed.el.isConnected) return;
+  livePaint(ed.el, composer.body, ed);
+}
 function setComposerColor(c){ composer.color = c; renderComposer(); }
 function toggleComposerPin(){ composer.pinned = !composer.pinned; renderComposer(); }
 
@@ -1695,24 +1996,37 @@ function removeComposerAttachment(id){
   renderComposer();
 }
 
+// Toolbar insertions operate on the live editor's caret / selection. The toolbar
+// row calls event.preventDefault() on mousedown so the editor keeps focus (and
+// therefore its selection) instead of losing both to the clicked button.
 function insertAtCursor(snippet, wrapSelection){
-  const ta = document.getElementById('composerTextarea');
-  if(!ta){
+  const ed = liveEditors['liveBody'];
+  const el = ed && ed.el;
+  if(!el || !el.isConnected){
     composer.body += snippet.replace('__SEL__','text');
     renderComposer();
     return;
   }
-  const start = ta.selectionStart, end = ta.selectionEnd;
-  const val = ta.value;
-  const selected = val.slice(start,end);
-  let insertText = wrapSelection ? snippet.replace('__SEL__', selected || 'text') : snippet;
-  const newVal = val.slice(0,start) + insertText + val.slice(end);
-  composer.body = newVal;
-  renderComposer();
-  setTimeout(()=>{
-    const ta2 = document.getElementById('composerTextarea');
-    if(ta2){ ta2.focus(); const pos = start + insertText.length; ta2.setSelectionRange(pos,pos); }
-  },0);
+  const sel = window.getSelection();
+  const hasSel = sel && sel.rangeCount && el.contains(sel.anchorNode);
+  const selected = hasSel ? sel.toString() : '';
+  const caret = liveCaret(el) || {line: 0, offset: liveEditorText(el).length};
+  const insertText = wrapSelection ? snippet.replace('__SEL__', selected || 'text') : snippet;
+  const lines = liveEditorText(el).split('\n');
+  const cur = lines[caret.line] || '';
+  const startOff = Math.min(caret.offset, cur.length);
+  const endOff = selected ? Math.min(startOff + selected.length, cur.length) : startOff;
+  const after = cur.slice(endOff);
+  const ins = insertText.replace(/\r\n?/g,'\n').split('\n');
+  ins[0] = cur.slice(0, startOff) + ins[0];
+  const tail = ins.length - 1;
+  ins[tail] = ins[tail] + after;
+  lines.splice(caret.line, 1, ...ins);
+  const text = lines.join('\n');
+  composer.body = text;
+  livePaint(el, text, ed);
+  el.focus();
+  liveSetCaret(el, {line: caret.line + tail, offset: ins[tail].length - after.length});
 }
 
 function toolbarBold(){ insertAtCursor('**__SEL__**', true); }
@@ -1785,19 +2099,11 @@ function wpUpdateTitle(id, val){
   saveNotes();
   renderSidebar();
 }
-function wpUpdateBody(id, val, taEl){
+function wpUpdateBody(id, val){
   const n = findNote(id); if(!n) return;
   n.body = val; n.updatedAt = Date.now();
   saveNotes();
-  const pv = document.getElementById('wpPreview-'+id);
-  if(pv) pv.innerHTML = renderMarkdown(n);
   renderSidebar();
-}
-function wpToggleTab(id, tab){
-  const panel = document.getElementById('wpPanel-'+id);
-  if(!panel) return;
-  panel.dataset.tab = tab;
-  renderWorkspace();
 }
 
 /* ============================= RENDER ============================= */
@@ -1854,8 +2160,11 @@ function renderSidebar(){
   }
 }
 
-function renderComposer(bodyOnly){
+function renderComposer(){
   const wrap = document.getElementById('composerWrap');
+  // Any debounced keystroke must land in the model before the DOM is rebuilt,
+  // otherwise the last characters typed would be dropped by the rebuild.
+  if(composer.expanded) flushLiveEditor('liveBody');
   if(!composer.expanded){
     wrap.innerHTML = `
       <div id="composer" class="glass" onclick="expandComposer()">
@@ -1872,15 +2181,6 @@ function renderComposer(bodyOnly){
           </div>
         </div>
       </div>`;
-    return;
-  }
-
-  if(bodyOnly){
-    const pv = document.getElementById('composerPreviewPane');
-    if(pv && composer.tab==='preview'){
-      const tmp = {...composer, id: editingId || '__draft__'};
-      pv.innerHTML = renderMarkdown(tmp);
-    }
     return;
   }
 
@@ -1913,7 +2213,7 @@ function renderComposer(bodyOnly){
   <div id="composer" class="glass-strong expanded" style="background:${colorObj.bg}" onclick="event.stopPropagation()">
     <input id="composerTitleInput" class="composer-title" placeholder="Title" value="${escapeHtml(composer.title)}" oninput="setComposerTitle(this.value)">
     ${createdMeta}
-    <div class="composer-toolbar">
+    <div class="composer-toolbar" onmousedown="event.preventDefault()">
       <button class="tbtn" title="Bold" onclick="toolbarBold()">B</button>
       <button class="tbtn" title="Italic" style="font-style:italic;" onclick="toolbarItalic()">i</button>
       <button class="tbtn" title="Header (collapsible)" onclick="toolbarHeader()">H</button>
@@ -1934,17 +2234,9 @@ function renderComposer(bodyOnly){
       ${historyBtn}
       <input type="file" id="imageFileInput" accept="image/*" style="display:none" onchange="handleImageFile(this)">
       <input type="file" id="attachFileInput" style="display:none" onchange="handleAttachFile(this)">
-      <div class="tab-switch">
-        <button class="${composer.tab==='write'?'active':''}" onclick="setComposerTab('write')">Write</button>
-        <button class="${composer.tab==='preview'?'active':''}" onclick="setComposerTab('preview')">Preview</button>
       </div>
-    </div>
 
-    ${composer.tab==='write' ? `
-      <textarea id="composerTextarea" class="composer-body" placeholder="Take a note… ">${escapeHtml(composer.body)}</textarea>
-    ` : `
-      <div id="composerPreviewPane" class="composer-preview clearfix">${renderMarkdown({...composer, id: editingId||'__draft__'})}</div>
-    `}
+    ${liveEditorMarkup('liveBody', 'Take a note\u2026 ')}
 
     ${renderAttachments(composer.attachments, true)}
 
@@ -1981,6 +2273,11 @@ function renderComposer(bodyOnly){
       </div>
     </div>
   </div>`;
+
+  mountLiveEditor('liveBody', composer.body, {
+    getNote: () => ({...composer, id: editingId || '__draft__'}),
+    onChange: (text) => { composer.body = text; }
+  });
 }
 
 function renderWorkspace(){
@@ -1990,27 +2287,23 @@ function renderWorkspace(){
   wrap.innerHTML = `<div class="section-label">Workspace</div><div class="workspace-row" style="margin-top:8px;">` +
     panels.map(n => {
       const colorObj = COLORS.find(c=>c.id===n.color) || COLORS[0];
-      const tab = document.getElementById('wpPanel-'+n.id)?.dataset.tab || 'write';
       return `
-      <div id="wpPanel-${n.id}" class="workspace-panel glass-strong" data-tab="${tab}" style="background:${colorObj.bg}">
+      <div id="wpPanel-${n.id}" class="workspace-panel glass-strong" style="background:${colorObj.bg}">
         <div class="wp-head">
           <input class="wp-title" value="${escapeHtml(n.title)}" placeholder="Title" oninput="wpUpdateTitle('${n.id}', this.value)">
           <button class="icon-btn" style="width:26px;height:26px;" title="Close panel" onclick="closeSplitPanel('${n.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
-        <div class="wp-toolbar">
-          <div class="tab-switch" style="margin-left:0;">
-            <button class="${tab==='write'?'active':''}" onclick="wpToggleTab('${n.id}','write')">Write</button>
-            <button class="${tab==='preview'?'active':''}" onclick="wpToggleTab('${n.id}','preview')">Preview</button>
-          </div>
-        </div>
-        ${tab==='write'
-          ? `<textarea class="wp-body" placeholder="Note contents…" oninput="wpUpdateBody('${n.id}', this.value, this)">${escapeHtml(n.body)}</textarea>`
-          : `<div id="wpPreview-${n.id}" class="composer-preview clearfix" style="overflow-y:auto;">${renderMarkdown(n)}</div>`}
+        <div class="wp-toolbar"><span class="wp-hint">Markdown renders as you type</span></div>
+        ${liveEditorMarkup('liveBody-' + n.id, 'Note contents\u2026 ')}
         ${renderAttachments(n.attachments, false)}
       </div>`;
     }).join('') + `</div>`;
+  panels.forEach(n => mountLiveEditor('liveBody-' + n.id, n.body, {
+    getNote: () => findNote(n.id),
+    onChange: (text) => wpUpdateBody(n.id, text)
+  }));
 }
 
 function matchesFilter(n){
