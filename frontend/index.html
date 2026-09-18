@@ -26,6 +26,7 @@
   --radius-sm: 10px;
   --shadow-glass: 0 8px 32px rgba(6,4,20,0.45);
   --blob-opacity: 0.55;
+  --ok: #22c55e; --err: #f43f5e;
   --card-pad: 16px;
   --grid-gap: 16px;
   --font-scale: 1;
@@ -104,6 +105,7 @@ html[data-theme="daylight"]{
   --glass-border: rgba(20,20,40,0.1); --glass-border-strong: rgba(20,20,40,0.16);
   --text-hi:#201c33; --text-mid:#4c4766; --text-lo:#847fa0;
   --accent:#0d9488; --accent-2:#7c3aed; --shadow-glass:0 8px 28px rgba(80,70,140,0.14); --blob-opacity:0.55;
+  --ok:#15803d; --err:#b3261e;
 }
 html[data-theme="linen"]{
   --bg-1:#f6f1ea; --bg-2:#efe6da; --bg-3:#f9f3ec;
@@ -112,6 +114,7 @@ html[data-theme="linen"]{
   --glass-border: rgba(60,45,30,0.12); --glass-border-strong: rgba(60,45,30,0.2);
   --text-hi:#2c2318; --text-mid:#5c4f3e; --text-lo:#8f8270;
   --accent:#b5651d; --accent-2:#6b7f5e; --shadow-glass:0 8px 28px rgba(90,70,40,0.15); --blob-opacity:0.4;
+  --ok:#15803d; --err:#b3261e;
 }
 html[data-theme="custom"]{ /* variables injected inline via JS */ }
 
@@ -465,9 +468,15 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
 .gbtn{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;border:1px solid rgba(60,45,30,0.14);background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(60,45,30,0.14);}
 .gbtn:hover{background:#f7f2ea;}
 .gbtn svg{flex:none;}
-.save-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim,rgba(255,255,255,.55));white-space:nowrap;padding:0 6px;}
-.save-status.ok{color:#22c55e;}
-.save-status.err{color:#f43f5e;}
+/* The status chip must stay readable on every theme. It used to rely on
+   var(--text-dim, rgba(255,255,255,.55)) and --text-dim is defined nowhere, so
+   the neutral states ("Saving…", "Loading from Drive…") rendered as translucent
+   white — invisible on the light Linen/Daylight themes. Use the theme's own
+   text token plus a glass chip so it reads on light *and* dark backgrounds. */
+.save-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-mid);white-space:nowrap;padding:3px 10px;border-radius:999px;background:var(--glass-bg-strong);border:1px solid var(--glass-border);}
+.save-status:empty{display:none;}
+.save-status.ok{color:var(--ok);}
+.save-status.err{color:var(--err);}
 .acct-btn{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:transparent;color:inherit;cursor:pointer;font-family:inherit;font-size:13px;}
 .acct-btn:hover{background:rgba(255,255,255,.08);}
 .acct-btn img{width:26px;height:26px;border-radius:50%;}
@@ -506,7 +515,10 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
       <input id="searchInput" type="text" placeholder="Search notes, labels, files or [[linked titles]]…" oninput="setSearch(this.value)">
     </div>
     <div class="header-actions">
-      <span class="save-status" id="saveStatus" title="Your notes are auto-saved to your Google Drive"></span>
+      <span class="save-status" id="saveStatus" title="Your notes auto-save to Keeply's private app folder in Google Drive."></span>
+      <button class="icon-btn" id="saveNowBtn" title="Save now to Google Drive — notes are stored in Keeply's private app folder, which Google keeps hidden from your Drive file list" onclick="saveToDriveNow()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12v9"/><path d="M8 16l4-4 4 4"/><path d="M20.9 18.4A5 5 0 0018 9h-1.3A8 8 0 104 16.3"/></svg>
+      </button>
       <button class="acct-btn" id="acctBtn" title="Account — click to sign out" onclick="signOutClicked()" style="display:none;">
         <img id="acctAvatar" alt="" referrerpolicy="no-referrer">
         <span id="acctEmail"></span>
@@ -696,11 +708,13 @@ const AUTH_BOOT_ATTEMPTS = 30;      // ~6s of 200ms retries while the GIS script
 const SILENT_TOKEN_TIMEOUT = 4000;  // some browsers never answer a silent token request
 
 /* ---------- status pill ---------- */
-function setStatus(text, cls){
+const STATUS_TITLE = "Your notes auto-save to Keeply's private app folder in Google Drive.";
+function setStatus(text, cls, detail){
   const el = document.getElementById('saveStatus');
   if(!el) return;
   el.textContent = text;
   el.className = 'save-status' + (cls ? ' ' + cls : '');
+  el.title = detail || STATUS_TITLE;
 }
 function signedInLabel(){
   if(!lastSavedAt) return 'Synced with Drive';
@@ -856,13 +870,23 @@ async function onTokenResponse(resp){
 }
 
 /* ---------- drive helpers ---------- */
+// Google returns a useful JSON message here (for example "Drive API has not been
+// used in project 123 before or it is disabled"). Surfacing it beats a bare
+// status code, since that's the usual reason a first-time setup fails.
+async function driveErrDetail(r){
+  try{
+    const t = await r.text();
+    const m = t.match(/"message"\s*:\s*"([^"]+)"/);
+    return m ? ' \u2014 ' + m[1] : '';
+  }catch(e){ return ''; }
+}
 async function findDriveFile(){
   const q = encodeURIComponent(`name = '${DRIVE_FILENAME}' and trashed = false`);
   const r = await fetch(
     `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,modifiedTime)`,
     { headers: { Authorization: 'Bearer ' + authState.accessToken } }
   );
-  if(!r.ok) throw new Error('Drive list failed: ' + r.status);
+  if(!r.ok) throw new Error('Drive list failed (' + r.status + ')' + await driveErrDetail(r));
   const data = await r.json();
   return (data.files && data.files[0] && data.files[0].id) || null;
 }
@@ -870,7 +894,7 @@ async function readDriveFile(fileId){
   const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: 'Bearer ' + authState.accessToken }
   });
-  if(!r.ok) throw new Error('Drive read failed: ' + r.status);
+  if(!r.ok) throw new Error('Drive read failed (' + r.status + ')' + await driveErrDetail(r));
   return r.text();
 }
 async function writeDriveFile(fileId, content){
@@ -888,7 +912,7 @@ async function writeDriveFile(fileId, content){
     headers: { Authorization: 'Bearer ' + authState.accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` },
     body,
   });
-  if(!r.ok) throw new Error('Drive write failed: ' + r.status);
+  if(!r.ok) throw new Error('Drive write failed (' + r.status + ')' + await driveErrDetail(r));
   const data = await r.json();
   return data.id;
 }
@@ -949,7 +973,7 @@ async function loadFromDrive(){
     else setStatus(signedInLabel(), 'ok');
   }catch(e){
     console.error('Drive load failed', e);
-    setStatus('Could not load from Drive', 'err');
+    setStatus('Could not load from Drive \u2014 hover for details', 'err', e.message);
   }
 }
 
@@ -958,6 +982,18 @@ function scheduleDriveSave(delay){
   if(!authState.signedIn){ savePending = true; return; }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveToDrive, delay === 0 ? 0 : AUTOSAVE_DELAY);
+}
+// Manual "Save now" control in the header. Autosave already runs on a debounce,
+// but there was no visible way to trigger or confirm it, so add an explicit one.
+async function saveToDriveNow(){
+  if(!authState.signedIn){
+    showAuthGate('Sign in with your Google account to save your notes to Drive.');
+    return;
+  }
+  clearTimeout(saveTimer);
+  if(savingNow){ savePending = true; setStatus('Saving\u2026'); return; }
+  savePending = false;
+  await saveToDrive();
 }
 async function saveToDrive(){
   if(!authState.signedIn){ savePending = true; return; }
@@ -971,7 +1007,18 @@ async function saveToDrive(){
     setStatus(signedInLabel(), 'ok');
   }catch(e){
     console.error('Drive save failed', e);
-    setStatus('Save failed \u2014 will retry on next change', 'err');
+    if(Date.now() >= authState.expiresAt){
+      // The silent refresh failed and the token really is expired/revoked, so
+      // every retry would fail identically. Ask for a fresh sign-in instead of
+      // repeating "will retry on next change" forever.
+      authState.signedIn = false;
+      authState.accessToken = null;
+      renderAccountBtn();
+      setStatus('');
+      showAuthGate('Your Google session expired. Sign in again to keep saving your notes to Drive.', true);
+      return;
+    }
+    setStatus('Save failed \u2014 hover for details', 'err', e.message);
     savePending = true;
   }finally{
     savingNow = false;
