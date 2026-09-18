@@ -435,13 +435,35 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
 }
 </style>
 <style>
-/* Google auth gate + status */
-#authGate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(20,16,36,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
-#authError.err{color:#ff9d9d;opacity:1;}
+/* Google auth gate + status.
+   The sign-in screen is its own branded surface: it always uses the warm "Linen"
+   palette (the very same tokens as html[data-theme="linen"]) so it matches the
+   app's light linen look whichever theme happens to be saved. Declaring the
+   tokens here means .glass / .auth-card / .mark below inherit them. */
+#authGate{
+  --bg-1:#f6f1ea; --bg-2:#efe6da; --bg-3:#f9f3ec;
+  --blob-a:#e7b78f; --blob-b:#c8a27a; --blob-c:#e8c9a3; --blob-d:#b7c2a8;
+  --glass-bg: rgba(255,255,255,0.5); --glass-bg-strong: rgba(255,255,255,0.65);
+  --glass-border: rgba(60,45,30,0.12); --glass-border-strong: rgba(60,45,30,0.2);
+  --text-hi:#2c2318; --text-mid:#5c4f3e; --text-lo:#8f8270;
+  --accent:#b5651d; --accent-2:#6b7f5e; --shadow-glass:0 8px 28px rgba(90,70,40,0.15);
+  position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;
+  color:var(--text-hi);
+  background:
+    radial-gradient(540px 540px at 10% 2%, rgba(231,183,143,0.55), transparent 70%),
+    radial-gradient(480px 480px at 4% 96%, rgba(200,162,122,0.40), transparent 70%),
+    radial-gradient(440px 440px at 92% 8%, rgba(232,201,163,0.50), transparent 70%),
+    radial-gradient(400px 400px at 96% 92%, rgba(183,194,168,0.42), transparent 70%),
+    linear-gradient(160deg, var(--bg-1), var(--bg-2) 55%, var(--bg-3));
+}
+#authError{color:var(--text-mid);}
+#authError.err{color:#b3261e;opacity:1;}
 .auth-card{display:flex;flex-direction:column;align-items:center;gap:18px;padding:48px 56px;border-radius:24px;text-align:center;}
-.auth-card .mark{width:64px;height:64px;font-size:32px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:linear-gradient(135deg,#7b5cff,#25d9c4);}
-.gbtn{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;border:none;background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
-.gbtn:hover{background:#f1f3f4;}
+.auth-card h2{color:var(--text-hi);font-family:'Space Grotesk',sans-serif;}
+.auth-card p{color:var(--text-mid);}
+.auth-card .mark{width:64px;height:64px;font-size:32px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-weight:700;color:#0c0a18;background:linear-gradient(135deg,var(--blob-a),var(--blob-b));box-shadow:0 4px 14px rgba(90,70,40,0.25);}
+.gbtn{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;border:1px solid rgba(60,45,30,0.14);background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(60,45,30,0.14);}
+.gbtn:hover{background:#f7f2ea;}
 .gbtn svg{flex:none;}
 .save-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim,rgba(255,255,255,.55));white-space:nowrap;padding:0 6px;}
 .save-status.ok{color:#22c55e;}
@@ -461,7 +483,7 @@ table.md-table tr:nth-child(even) td{background:rgba(255,255,255,0.03);}
   <div class="auth-card glass">
     <div class="mark">K</div>
     <h2 style="margin:0;font-size:22px;">Welcome to Keeply</h2>
-    <p style="margin:0;opacity:.65;font-size:14px;max-width:340px;">
+    <p style="margin:0;opacity:.8;font-size:14px;max-width:340px;">
       Sign in with your Google account. Your notes are stored privately in your
       Google Drive (hidden app folder) and auto-saved as you type.
     </p>
